@@ -1,0 +1,31 @@
+version inicial
+
+Se ofrece este codigo fuente (Berlin 10.1) como ejemplo y con fines educativos, no lucrativos
+No hay ninguna garantia de que el codigo sea correcto, funcional y operativo
+Queda bajo su responsabilidad utilizarlo, modificarlo, etc...
+
+Funcionamiento:
+
+El ejemplo incluye el codigo basico y simple de un alta y anulacion de factura.
+
+La unidad SistemaFacturacionSOAPv12.pas  ha sido algo modificada para soportar el simulador
+
+Se importa con un modelo de hoja de calculo
+Los datos importados pasan una rejilla para su previsualizacion
+Al enviarlo, se colocan los datos en un record TRegistroFactura
+Los datos del TRegistroFactura se colocan en el RegistroFacturacionAltaType ó RegistroFacturacionAnulacionType
+Se envian y guardan en una base de datos XML para tener el encadenamiento Facturas.xml
+
+Se suministra un simulador de envio, que permite "simular" la respuesta de la AEAT (de una manera muy elemental)
+Los datos del simulador se guardan en simulador.xml
+
+
+26-06
+Añadido Anulacion
+
+27-06
+Calculo revisado de las huellas
+
+28
+Añadido simulador
+rejilla de base de datos de almacenamiento
