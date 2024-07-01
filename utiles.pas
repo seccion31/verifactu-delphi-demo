@@ -20,7 +20,8 @@ uses
   Vcl.StdCtrls,
   Vcl.Grids,
   Data.DB,
-  DBClient;
+  DBClient,
+  registry;
 
 type
     TRegistroFacturaIVAS=record
@@ -66,6 +67,7 @@ procedure sistemaInformatico(var Factura: RegistroFacturaType);
 function  Certificados(aList:TStringList):integer;
 function  BUSCAR_CERTIFICADO_SERIAL(Nombre_Certificado: String): string;
 function  BUSCAR_CERTIFICADO_SERIAL_EXT(Nombre_Certificado:string; VAR serial, isuer, name: String): string;
+function  CERTIFICADO_ALIAS(nombre_certificado:string):string;
 
 // simulador de envios
 function simular_envio( averifactu: RegFactuSistemaFacturacion ):RespuestaBaseType;
@@ -73,6 +75,9 @@ function simular_envio( averifactu: RegFactuSistemaFacturacion ):RespuestaBaseTy
 // otros
 function  value(n:string):currency;
 procedure resetStringGrid(const Grid: TStringGrid);
+function  autoFirmaPath:string;
+procedure ExecuteAndWait(const aCommando: string);
+
 
 var
     SistemaInformatico_razonSocial:string;
@@ -83,6 +88,37 @@ var
     SistemaInformatico_NumeroInstalacion:string;
 
 implementation
+
+
+function CERTIFICADO_ALIAS(nombre_certificado:string):string;
+const
+  CAPICOM_CA_STORE = 'ca';
+  CAPICOM_MY_STORE = 'my';
+  CAPICOM_ADDRESS_BOOK_STORE = 'AddressBook';
+  CAPICOM_OTHER_STORE = 'other';
+  CAPICOM_ROOT_STORE = 'root';
+var
+    carpetaAlmacen : IStore;
+    certificadosAlmacen : ICertificates;
+    certificadoActual : ICertificate2;
+    i, j: integer;
+begin
+  carpetaAlmacen := CoStore.Create;
+  carpetaAlmacen.Open(CAPICOM_CURRENT_USER_STORE,CAPICOM_MY_STORE, CAPICOM_STORE_OPEN_MAXIMUM_ALLOWED or CAPICOM_STORE_OPEN_INCLUDE_ARCHIVED or CAPICOM_STORE_OPEN_EXISTING_ONLY);
+  certificadosAlmacen := carpetaAlmacen.Certificates as ICertificates2;
+  for i := 1 to certificadosAlmacen.Count do
+  begin
+        certificadoActual :=IInterface(certificadosAlmacen.Item[i]) as ICertificate2;
+
+        if nombre_certificado=certificadoActual.GetInfo (CAPICOM_CERT_INFO_SUBJECT_DNS_NAME) then
+        begin
+             result:=certificadoActual.PrivateKey.ContainerName;
+             exit;
+        end;
+  end;
+end;
+
+
 
 
 procedure resetStringGrid(const Grid: TStringGrid);
@@ -542,6 +578,60 @@ begin
 
       result:=aRes;
 end;
+
+
+procedure ExecuteAndWait(const aCommando: string);
+var
+  tmpStartupInfo: TStartupInfo;
+  tmpProcessInformation: TProcessInformation;
+  tmpProgram: String;
+begin
+  tmpProgram := trim(aCommando);
+  FillChar(tmpStartupInfo, SizeOf(tmpStartupInfo), 0);
+  with tmpStartupInfo do
+  begin
+    cb := SizeOf(TStartupInfo);
+    wShowWindow := SW_HIDE;
+  end;
+
+  if CreateProcess(nil, pchar(tmpProgram), nil, nil, true, CREATE_NO_WINDOW,
+    nil, nil, tmpStartupInfo, tmpProcessInformation) then
+  begin
+    // loop every 10 ms
+    while WaitForSingleObject(tmpProcessInformation.hProcess, 10) > 0 do
+    begin
+      Application.ProcessMessages;
+    end;
+    CloseHandle(tmpProcessInformation.hProcess);
+    CloseHandle(tmpProcessInformation.hThread);
+  end
+  else
+  begin
+    RaiseLastOSError;
+  end;
+end;
+
+function autoFirmaPath:string;
+var
+  Reg: TRegistry;
+begin
+  Reg := TRegistry.Create;
+  with Reg do
+  begin
+    RootKey := HKEY_CLASSES_ROOT;
+    if OpenKey('\afirma\shell\open\command',false) then
+    begin
+      if ValueExists('') then
+        Result := Readstring('')
+      else
+        ShowMessage('error');
+    end
+    else
+      ShowMessage('Error 2');
+    CloseKey;
+  end;
+end;
+
 
 end.
 

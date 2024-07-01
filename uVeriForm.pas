@@ -67,6 +67,7 @@ type
     TabSheet2: TTabSheet;
     DataSource1: TDataSource;
     DBGrid1: TDBGrid;
+    Button4: TButton;
     procedure enviarClick(Sender: TObject);
     procedure HTTPRIO1BeforeExecute(const MethodName: string; SOAPRequest: TStream);
     procedure FormShow(Sender: TObject);
@@ -74,6 +75,7 @@ type
     procedure Button1Click(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure Button3Click(Sender: TObject);
+    procedure Button4Click(Sender: TObject);
     private
     { Private declarations }
   public
@@ -480,6 +482,36 @@ begin
 end;
 
 
+// firmar el XML con autofirma
+procedure TfVeriFactuForm.Button4Click(Sender: TObject);
+var
+  rutaAutoFirma:string;
+  aliascertificado:string;
+  cadena:string;
+begin
+    rutaAutoFirma:=extractfilePath( autoFirmaPath )+'AutoFirmaCommandLine.exe';
+    aliascertificado:=CERTIFICADO_ALIAS(comboCertificados.Text);
+    if aliasCertificado='' then
+    begin
+          showmessage('No Se Encuentra Alias Certificado: '+comboCertificados.Text);
+          exit;
+    end;
+
+    if  fileExists( rutaAutoFirma ) then
+    begin
+          if fileExists( xmlSalida_signed) then deleteFile( xmlSalida_signed );
+
+          cadena:=ExtractShortPathName (rutaAutoFirma )+' sign -format xades -i "%s" -o "%s" -store windows -password "" -alias "%s"';
+          cadena:=format( cadena,[xmlSalida,xmlSalida_signed,aliascertificado ]);
+          ExecuteAndWait(cadena);
+
+          if not FileExists(xmlSalida_signed )  then showmessage('Error Firmando')
+                                                else shellexecute(handle,'open',pchar(xmlSalida_signed),nil,nil,sw_showNormal);
+    end
+    else
+        showmessage('AutoFirma No Presente En: '+rutaAutoFirma);
+    //;
+end;
 
 // CERRAR EL FORMULARIO Y GUARDAR EL ULTIMO CERTIFICADO USADO
 procedure TfVeriFactuForm.FormClose(Sender: TObject; var Action: TCloseAction);

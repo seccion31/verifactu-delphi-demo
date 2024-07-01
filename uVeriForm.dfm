@@ -49,7 +49,7 @@ object fVeriFactuForm: TfVeriFactuForm
     Top = 122
     Width = 902
     Height = 437
-    ActivePage = TabSheet1
+    ActivePage = Resultado
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
     Font.Height = -12
@@ -1176,6 +1176,21 @@ object fVeriFactuForm: TfVeriFactuForm
         ParentFont = False
         TabOrder = 2
         OnClick = Button3Click
+      end
+      object Button4: TButton
+        Left = 656
+        Top = 7
+        Width = 115
+        Height = 25
+        Caption = 'AutoFirmaXML'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clWindowText
+        Font.Height = -11
+        Font.Name = 'Tahoma'
+        Font.Style = []
+        ParentFont = False
+        TabOrder = 3
+        OnClick = Button4Click
       end
     end
     object TabSheet3: TTabSheet
