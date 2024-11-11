@@ -77,6 +77,8 @@
         <DCC_RemoteDebug>true</DCC_RemoteDebug>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
+        <DCC_UnitSearchPath>.\QRuicol;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <Debugger_RunParams>C:\PROYECTOS\VERIFACTU2\Win32\Debug\TICKET.XLSX</Debugger_RunParams>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <Icon_MainIcon>verifactu.ico</Icon_MainIcon>

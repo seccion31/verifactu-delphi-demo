@@ -1,3 +1,6 @@
+// https://indy.fulgan.com/SSL/
+
+
 unit utiles;
 
 interface
@@ -5,6 +8,8 @@ uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
   system.Hash,
+  System.JSON,
+  IdHTTP, IdSSLOpenSSL, IdIOHandler,  IdIOHandlerSocket,
   Xml.xmldom,
   Xml.XMLIntf,
   Xml.XMLDoc,
@@ -16,7 +21,7 @@ uses
   CertHelper,
   System.TypInfo,
   DateUtils,
-  SistemaFacturacionSOAPv12,
+  SistemaFacturacion,
   Vcl.StdCtrls,
   Vcl.Grids,
   Data.DB,
@@ -36,6 +41,8 @@ type
     TRegistroFactura=record
 
         nifEmisor:string;
+        nombreEmisor:string;
+
         numSerieFactura:string;
         fechaFactura:string;
 
@@ -46,6 +53,8 @@ type
         desglose:array of TRegistroFacturaIVAS;
 
         cuotatotal,total:currency;
+
+        situacion:string;
 
         huella:string;
     end;
@@ -60,8 +69,15 @@ function  GenerarHuellaRegistroVerifactu(CadenaVerifactu : String) : String;
 function  CodigoPais(paisCode:string):CountryType2;
 function  tipoNIF(tipo:string):PersonaFisicaJuridicaIDTypeType;
 function  veriFactuFecha(n:string):string;
+function  veriFactuEstadoEnvio(aestado:EstadoEnvioType):string;
 function  TipoFacturaVerifactuToString( TipoFactura : ClaveTipoFacturaType ) : String; var Resultado : String;
 procedure sistemaInformatico(var Factura: RegistroFacturaType);
+function  numeroVerifactu(valor:currency):string;
+
+
+// comprobar facturas 5º parametro del codigoQR  &formato=json
+function  GetUrlContent(url: string): string;
+function  checkStatus(aDataset:TDataSet; json:string; var cotejo:string):integer;
 
 // certificados atraves de capicom.dll
 function  Certificados(aList:TStringList):integer;
@@ -70,7 +86,7 @@ function  BUSCAR_CERTIFICADO_SERIAL_EXT(Nombre_Certificado:string; VAR serial, i
 function  CERTIFICADO_ALIAS(nombre_certificado:string):string;
 
 // simulador de envios
-function simular_envio( averifactu: RegFactuSistemaFacturacion ):RespuestaBaseType;
+//function simular_envio( averifactu: RegFactuSistemaFacturacion ):RespuestaBaseType;
 
 // otros
 function  value(n:string):currency;
@@ -88,6 +104,44 @@ var
     SistemaInformatico_NumeroInstalacion:string;
 
 implementation
+
+
+// necesitas dos librerias para el ssl: ssleay32.dll y libeay32.dll
+// https://indy.fulgan.com/SSL/
+function GetUrlContent(url: string): string;
+var
+  HTTP: TIdHTTP;
+  SSL: TIdSSLIOHandlerSocketOpenSSL;
+begin
+  HTTP := TIdHTTP.Create(nil);
+  try
+    SSL := TIdSSLIOHandlerSocketOpenSSL.Create(HTTP);
+    SSl.SSLOptions.SSLVersions:=[ sslvTLSv1_2 ];
+    HTTP.IOHandler := SSL;
+    result := HTTP.Get(url);
+  finally
+    HTTP.Free;
+  end;
+end;
+
+function  checkStatus(aDataset:TDataSet; json:string; var cotejo:string):integer;
+var
+  obj : TJSONObject;
+  ok,mensaje,numserie,fecha,importe:string;
+begin
+           result:=0;
+
+           obj      := TJSONObject.ParseJSONValue(json) as TJSONObject;
+
+           ok       :=obj.Values['status'].Value;
+           mensaje  :=obj.Values['mensaje'].Value;
+
+           Obj.Free;
+
+           cotejo:=ok+' '+mensaje;
+
+           if ok<>'OK' then result:=1;
+end;
 
 
 function CERTIFICADO_ALIAS(nombre_certificado:string):string;
@@ -118,6 +172,12 @@ begin
   end;
 end;
 
+function  numeroVerifactu(valor:currency):string;
+begin
+     result:=FormatFloat('0.00',valor);
+
+     result[length(result)-2]:='.';
+end;
 
 
 
@@ -148,6 +208,13 @@ begin
         result:=StrToCurr(n);
 end;
 
+
+function veriFactuEstadoEnvio(aestado:EstadoEnvioType):string;
+begin
+      if aEstado= sistemafacturacion.EstadoEnvioType.Correcto             then result:='Correcto';
+      if aEstado= sistemafacturacion.EstadoEnvioType.ParcialmenteCorrecto then result:='ParcialmenteCorrecto';
+      if aEstado= sistemafacturacion.EstadoEnvioType.Incorrecto           then result:='Incorrecto';
+end;
 
 function codigoPais(paisCode:string):CountryType2;
 var
@@ -209,7 +276,7 @@ end;
 
 function GenerarHuellaRegistroVerifactu(CadenaVerifactu : String) : String;
 Begin
-       Result := THashSHA2.GetHashString(CadenaVerifactu,THashSHA2.TSHA2Version.SHA256);
+       Result := UpperCase( THashSHA2.GetHashString(CadenaVerifactu,THashSHA2.TSHA2Version.SHA256) );
 End;
 
 
@@ -240,11 +307,12 @@ begin
         Factura.RegistroAlta.SistemaInformatico.NombreRazon := SistemaInformatico_razonSocial;
         Factura.RegistroAlta.SistemaInformatico.NIF         := SistemaInformatico_nif;
 
+        (*
         Factura.RegistroAlta.SistemaInformatico.IDOtro            := IDOtroType.Create;
         Factura.RegistroAlta.SistemaInformatico.IDOtro.CodigoPais := CountryType2.ES;
         Factura.RegistroAlta.SistemaInformatico.IDOtro.IDType     := PersonaFisicaJuridicaIDTypeType._02;
         Factura.RegistroAlta.SistemaInformatico.IDOtro.ID         := '';
-
+        *)
 
         Factura.RegistroAlta.SistemaInformatico.NombreSistemaInformatico    := SistemaInformatico_Nombre;
         Factura.RegistroAlta.SistemaInformatico.IdSistemaInformatico        := SistemaInformatico_ID;
@@ -252,7 +320,7 @@ begin
         Factura.RegistroAlta.SistemaInformatico.NumeroInstalacion           := SistemaInformatico_NumeroInstalacion;
         Factura.RegistroAlta.SistemaInformatico.TipoUsoPosibleSoloVerifactu := SiNoType.S;
         Factura.RegistroAlta.SistemaInformatico.TipoUsoPosibleMultiOT       := SiNoType.N;
-        Factura.RegistroAlta.SistemaInformatico.NumeroOTAlta                := '1';
+//        Factura.RegistroAlta.SistemaInformatico.NumeroOTAlta                := '1';
     end
     else
     begin
@@ -260,11 +328,12 @@ begin
         Factura.RegistroAnulacion.SistemaInformatico.NombreRazon := SistemaInformatico_razonSocial;
         Factura.RegistroAnulacion.SistemaInformatico.NIF         := SistemaInformatico_nif;
 
+        (*
         Factura.RegistroAnulacion.SistemaInformatico.IDOtro            := IDOtroType.Create;
         Factura.RegistroAnulacion.SistemaInformatico.IDOtro.CodigoPais := CountryType2.ES;
         Factura.RegistroAnulacion.SistemaInformatico.IDOtro.IDType     := PersonaFisicaJuridicaIDTypeType._02;
         Factura.RegistroAnulacion.SistemaInformatico.IDOtro.ID         := '';
-
+        *)
 
         Factura.RegistroAnulacion.SistemaInformatico.NombreSistemaInformatico    := SistemaInformatico_Nombre;
         Factura.RegistroAnulacion.SistemaInformatico.IdSistemaInformatico        := SistemaInformatico_ID;
@@ -272,7 +341,7 @@ begin
         Factura.RegistroAnulacion.SistemaInformatico.NumeroInstalacion           := SistemaInformatico_NumeroInstalacion;
         Factura.RegistroAnulacion.SistemaInformatico.TipoUsoPosibleSoloVerifactu := SiNoType.S;
         Factura.RegistroAnulacion.SistemaInformatico.TipoUsoPosibleMultiOT       := SiNoType.N;
-        Factura.RegistroAnulacion.SistemaInformatico.NumeroOTAlta                := '1';
+//        Factura.RegistroAnulacion.SistemaInformatico.NumeroOTAlta                := '1';
     end;
     // Fin Informatico
 end;
@@ -453,6 +522,7 @@ begin
       dataSet.post;
 end;
 
+(*
 function simular_envio( averifactu: RegFactuSistemaFacturacion ):RespuestaBaseType;
 var
   j: Integer;
@@ -578,6 +648,7 @@ begin
 
       result:=aRes;
 end;
+*)
 
 
 procedure ExecuteAndWait(const aCommando: string);

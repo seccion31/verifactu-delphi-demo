@@ -3,20 +3,24 @@ unit uVeriForm;
 interface
 
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Winapi.Windows,winapi.wininet, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs,
+  QuricolCode,
   system.Hash,
   shellapi,
   utiles,
+  Soap.Win.CertHelper,
+  CAPICOM_TLB,
   Xml.xmldom,
   Xml.XMLIntf,
   Xml.XMLDoc,
   Soap.InvokeRegistry,
   Soap.OPToSOAPDomConv,
   Soap.OPConvert,
+  Soap.SOAPHTTPTrans,
   Soap.XSBuiltIns,
   inifiles,
-  SistemaFacturacionSOAPv12,
+  SistemaFacturacion,
   Vcl.StdCtrls,
   Soap.Rio,
   Soap.SOAPHTTPClient,
@@ -52,7 +56,6 @@ type
     editInstalacion: TEdit;
     Button1: TButton;
     openXLS: TOpenDialog;
-    abrirExcel: TButton;
     Label8: TLabel;
     editEmisor: TEdit;
     editNIFEmisor: TEdit;
@@ -60,14 +63,26 @@ type
     Label10: TLabel;
     Label11: TLabel;
     memoRes: TMemo;
-    Button2: TButton;
     Button3: TButton;
     FacturasEnviadas: TClientDataSet;
-    botonSimula: TButton;
     TabSheet2: TTabSheet;
-    DataSource1: TDataSource;
+    dsFacturasEnviadas: TDataSource;
     DBGrid1: TDBGrid;
     Button4: TButton;
+    GroupBox3: TGroupBox;
+    Label12: TLabel;
+    editURL: TEdit;
+    Button5: TButton;
+    Label13: TLabel;
+    editQR: TEdit;
+    abrirExcel: TButton;
+    Button2: TButton;
+    Button6: TButton;
+    Button7: TButton;
+    saveBMP: TSaveDialog;
+    soloXML: TButton;
+    saveXMLS: TSaveDialog;
+    Button8: TButton;
     procedure enviarClick(Sender: TObject);
     procedure HTTPRIO1BeforeExecute(const MethodName: string; SOAPRequest: TStream);
     procedure FormShow(Sender: TObject);
@@ -76,15 +91,24 @@ type
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure Button3Click(Sender: TObject);
     procedure Button4Click(Sender: TObject);
+    procedure HTTPRIO1HTTPWebNode1BeforePost(const HTTPReqResp: THTTPReqResp; Data: Pointer);
+    procedure HTTPRIO1AfterExecute(const MethodName: string;
+      SOAPResponse: TStream);
+    procedure StringGridFacturasDblClick(Sender: TObject);
+    procedure DBGrid1DblClick(Sender: TObject);
+    procedure Button5Click(Sender: TObject);
+    procedure Button7Click(Sender: TObject);
+    procedure Button8Click(Sender: TObject);
     private
     { Private declarations }
   public
     { Public declarations }
-    curdir, xmlSalida, xmlSalida_signed, xmlFacturas:string;
+    curdir, xmlSalida, xmlSalida_signed, xmlFacturas,xmlEnvio:string;
 
     procedure stringGrid_to_Factura(fila:integer; var factura, anterior:TRegistroFactura);
     procedure archivoFactura(factura:TRegistroFactura; estado:string);
-    procedure procesarEnvio( res:RespuestaBaseType );
+    procedure procesarEnvio( res:RespuestaRegFactuSistemaFacturacionType );
+    function  rutaQR:string;
   end;
 
 var
@@ -141,7 +165,7 @@ Huella
 //
 // toma una factura y su anterior cargadas en un record y devuelve el objeto verifactu registroFacturaType.RegistroAlta:
 //
-function altafactura_F1_verifactu( var facturaRegistro, registroAnterior:TRegistroFactura ): RegistroFacturaType;
+function altafactura_F1_F2_verifactu( var facturaRegistro, registroAnterior:TRegistroFactura ): RegistroFacturaType;
 var
     Factura             : RegistroFacturaType;
     Destinatario        : PersonaFisicaJuridicaType;
@@ -154,32 +178,47 @@ var
 begin
     Factura := RegistroFacturaType.Create;
 
-    Factura.RegistroAlta            := RegistroFacturacionAltaType.Create;
-    Factura.RegistroAlta.IDVersion  := VersionType._1_0;
+    Factura.RegistroAlta            := RegistroAlta.Create;
+    Factura.RegistroAlta.IDVersion  := SistemaFacturacion.VersionType(0);
 
+
+    Factura.RegistroAlta.NombreRazonEmisor                := facturaRegistro.nombreEmisor;
     Factura.RegistroAlta.IDFactura                        := IDFacturaExpedidaType.Create;
     Factura.RegistroAlta.IDFactura.IDEmisorFactura        := facturaRegistro.nifEmisor;
+
     Factura.RegistroAlta.IDFactura.NumSerieFactura        := facturaRegistro.numSerieFactura;
     Factura.RegistroAlta.IDFactura.FechaExpedicionFactura := verifactuFecha( facturaRegistro.fechafactura ) ; // (dd-mm-yyyy)
-
-    Factura.RegistroAlta.TipoFactura                      := ClaveTipoFacturaType.F1;
     Factura.RegistroAlta.DescripcionOperacion             := facturaRegistro.DescripcionOperacion;
 
+
     // 1 destinatario (cliente):
-    Destinatario                    := PersonaFisicaJuridicaType.Create;
-    Destinatario.NombreRazon        := facturaRegistro.cliente;
-    Destinatario.NIF                := facturaRegistro.clienteNIF;
+    if facturaRegistro.clienteNIF<>'' then        // es una factura con destinatario TIPO F1
+    begin
+        Factura.RegistroAlta.TipoFactura := ClaveTipoFacturaType.F1;
+        Destinatario                     := PersonaFisicaJuridicaType.Create;
 
-    Destinatario.IDOtro             := IDOtroType.Create;
-    Destinatario.IDOtro.CodigoPais  := codigoPais( facturaRegistro.clienteCodPais );
-    Destinatario.IDOtro.IdType      := tipoNIF( facturaRegistro.clientetipoNIF);
-    Destinatario.IDOtro.ID          := facturaRegistro.clienteNIF;
 
-    // El destinatario (cliente) a la lista  (solo 1 cliente x factura)
-    ListaDestinatarios:= destinatarios.Create();
-    SetLength(ListaDestinatarios, 1);
-    ListaDestinatarios[0]               := Destinatario;
-    Factura.RegistroAlta.Destinatarios  := ListaDestinatarios;
+        Destinatario.NombreRazon         := facturaRegistro.cliente;
+        Destinatario.NIF                 := facturaRegistro.clienteNIF;
+
+        (*
+        Destinatario.IDOtro             := IDOtroType.Create;
+        Destinatario.IDOtro.CodigoPais  := codigoPais( facturaRegistro.clienteCodPais );
+        Destinatario.IDOtro.IdType      := tipoNIF( facturaRegistro.clientetipoNIF);
+        Destinatario.IDOtro.ID          := facturaRegistro.clienteNIF;
+        *)
+
+        // El destinatario (cliente) a la lista  (solo 1 cliente x factura)
+        ListaDestinatarios:= destinatarios.Create();
+        SetLength(ListaDestinatarios, 1);
+        ListaDestinatarios[0]               := Destinatario;
+        Factura.RegistroAlta.Destinatarios  := ListaDestinatarios;
+    end
+    else
+    begin
+        Factura.RegistroAlta.TipoFactura := ClaveTipoFacturaType.F2;    // sin destinatario TIPO F2 (un ticket)
+        Factura.RegistroAlta.FacturaSinIdentifDestinatarioArt61d:=CompletaSinDestinatarioType.S;
+    end;
 
     // Desglose de iva:
     ListaDesglose := DesgloseType.Create();
@@ -190,14 +229,14 @@ begin
           DetalleDesglose.ClaveRegimen                  := IdOperacionesTrascendenciaTributariaType._01;
           DetalleDesglose.CalificacionOperacion         := CalificacionOperacionType.S1;
 
-          DetalleDesglose.TipoImpositivo                := FormatFloat('0.00',facturaRegistro.desglose[j].iva);
-          DetalleDesglose.BaseImponibleOimporteNoSujeto := FormatFloat('0.00',facturaRegistro.desglose[j].baseImp);
-          DetalleDesglose.CuotaRepercutida              := FormatFloat('0.00',facturaRegistro.desglose[j].impiva);
+          DetalleDesglose.TipoImpositivo                := NumeroVeriFactu( facturaRegistro.desglose[j].iva );
+          DetalleDesglose.BaseImponibleOimporteNoSujeto := NumeroVeriFactu( facturaRegistro.desglose[j].baseImp );
+          DetalleDesglose.CuotaRepercutida              := NumeroVeriFactu( facturaRegistro.desglose[j].impiva );
 
           if facturaRegistro.desglose[j].req<>0 then    // ¿ lleva recargo de equivalencia ?
           begin
-              DetalleDesglose.TipoRecargoEquivalencia       := FormatFloat('0.00',facturaRegistro.desglose[j].req);
-              DetalleDesglose.CuotaRecargoEquivalencia      := FormatFloat('0.00',facturaRegistro.desglose[j].impreq);
+              DetalleDesglose.TipoRecargoEquivalencia       := NumeroVeriFactu( facturaRegistro.desglose[j].req );
+              DetalleDesglose.CuotaRecargoEquivalencia      := NumeroVeriFactu( facturaRegistro.desglose[j].impreq );
           end;
 
           // colocar el desglose en la lista
@@ -205,11 +244,13 @@ begin
           ListaDesglose[j] := DetalleDesglose ;
       end;
 
+
+
       // asignar los desgloses al objeto de factura:
       Factura.RegistroAlta.Desglose:= ListaDesglose;
 
-      Factura.RegistroAlta.CuotaTotal   := FormatFloat('0.00',facturaRegistro.cuotatotal);
-      Factura.RegistroAlta.ImporteTotal := FormatFloat('0.00',facturaRegistro.total);
+      Factura.RegistroAlta.CuotaTotal   := NumeroVeriFactu( facturaRegistro.cuotatotal ) ;
+      Factura.RegistroAlta.ImporteTotal := NumeroVeriFactu(  facturaRegistro.total );
 
       // Encadenamiento
       Factura.RegistroAlta.Encadenamiento := Encadenamiento2.Create;
@@ -230,7 +271,13 @@ begin
 
     //XSDatetime
     XSDatetime := TXSDatetime.Create;
+    XSDatetime.UseZeroMilliseconds := False;
     XSDatetime.AsDateTime := Now;
+    XSDatetime.Millisecond := 0;
+    XSDatetime.UseZeroMilliseconds := False;
+    XSDatetime.FractionalSeconds := 0;
+
+
     Factura.RegistroAlta.FechaHoraHusoGenRegistro := XSDatetime; // Formato: YYYY-MM-DDThh:mm:ssTZD (ej: 2024-01-01T19:20:30+01:00) (ISO 8601)
 
     // Huella
@@ -290,7 +337,7 @@ var
 begin
     Factura := RegistroFacturaType.Create;
 
-    Factura.RegistroAnulacion             := RegistroFacturacionAnulacionType.Create;
+    Factura.RegistroAnulacion             := RegistroAnulacion.Create;
     Factura.RegistroAnulacion.IDVersion   := VersionType._1_0;
 
     Factura.RegistroAnulacion.IDFactura                               := IDFacturaExpedidaBajaType.Create;
@@ -317,7 +364,11 @@ begin
 
     //XSDatetime
     XSDatetime := TXSDatetime.Create;
+    XSDatetime.UseZeroMilliseconds := False;
     XSDatetime.AsDateTime := Now;
+    XSDatetime.Millisecond := 0;
+    XSDatetime.UseZeroMilliseconds := False;
+    XSDatetime.FractionalSeconds := 0;
     Factura.RegistroAnulacion.FechaHoraHusoGenRegistro := XSDatetime; // Formato: YYYY-MM-DDThh:mm:ssTZD (ej: 2024-01-01T19:20:30+01:00) (ISO 8601)
 
     // Huella
@@ -468,6 +519,9 @@ begin
       ini.writestring('cabecera','RazonSocial', editEmisor.text);
       ini.writestring('cabecera','nif',         editNIFEmisor.text);
 
+      ini.writestring('verifactu','url',        editURL.text);
+      ini.writestring('verifactu','qr',         editQR.text);
+
       ini.free;
       //
 
@@ -513,6 +567,71 @@ begin
     //;
 end;
 
+procedure TfVeriFactuForm.Button5Click(Sender: TObject);
+begin
+        // abrir ultima transmision:
+      if fileExists(xmlSalida) then
+          shellexecute(handle,'open',pchar(xmlEnvio),nil,nil,sw_showNormal);
+end;
+
+function TfVeriFactuForm.rutaQR;
+var
+    nif, numserie, fecha, total:string;
+begin
+      nif:=       editNIFEmisor.Text;
+      numserie:=  FacturasEnviadas.fieldbyName('NumSerieFactura').Text;
+      fecha:=     veriFactuFecha( FacturasEnviadas.fieldbyName('FechaExpedicioFactura').Text );
+      total:=     NumeroVeriFactu( FacturasEnviadas.fieldbyName('total').ascurrency );
+
+      result:=editQR.Text+'?nif='+nif+'&numserie='+numserie+'&fecha='+fecha+'&importe='+total;
+end;
+
+procedure TfVeriFactuForm.Button7Click(Sender: TObject);
+var
+  QRuiCol:TQRCode;
+begin
+      // generar QR
+      saveBMP.FileName:=FacturasEnviadas.fieldbyName('NumSerieFactura').Text+'.bmp';
+      if not saveBMP.execute then exit;
+
+      QRuiCol:=TQRCode.create;
+      QRuiCol.GenerateBitmapFile(saveBMP.filename,rutaQR,4,4);
+      QRuiCol.free;
+      //
+end;
+
+procedure TfVeriFactuForm.Button8Click(Sender: TObject);
+var
+  n:integer;
+  json:string;
+  cotejo:string;
+begin
+      // cotejar facturas vs la web de la AEAT 5º parametro  &formato=json
+      screen.Cursor:=crHourglass;
+      json:= getURLContent(rutaQR+'&formato=json');
+      n:=0;
+      FacturasEnviadas.First;
+      while not FacturasEnviadas.eof do
+      begin
+           n:=n+checkStatus( FacturasEnviadas, json, cotejo );     // si +1 entonces la factura tiene algun error o inconsistencia
+
+           FacturasEnviadas.Edit;
+           FacturasEnviadas.fieldbyName('cotejo').Text:=cotejo;   // guardamos una descripcion del cotejo
+           FacturasEnviadas.post;
+
+           FacturasEnviadas.Next;
+      end;
+      screen.Cursor:=crDefault;
+
+      showmessage('Proceso Completado'+^M+inttostr(n)+'Facturas A Comprobar Con Algun Posible Problema');
+end;
+
+procedure TfVeriFactuForm.DBGrid1DblClick(Sender: TObject);
+begin
+
+      ShellExecute(0, 'open', PChar( rutaQR ), nil, nil, SW_SHOWNORMAL);
+end;
+
 // CERRAR EL FORMULARIO Y GUARDAR EL ULTIMO CERTIFICADO USADO
 procedure TfVeriFactuForm.FormClose(Sender: TObject; var Action: TCloseAction);
 var
@@ -534,6 +653,7 @@ begin
       xmlSalida         := ExtractFilePath(Application.ExeName) + 'VeriFactu_envio.xml';            // guarda el xml del ultimo envio
       xmlSalida_signed  := ExtractFilePath(Application.ExeName) + 'VeriFactu_envio_signed.xml';     // guarda el xml firmado con autofirma
       xmlFacturas       := ExtractFilePath(Application.ExeName) + 'Facturas.xml';                   // guarda el historico de facturas para el encadenamiento y su csv
+      xmlEnvio          := ExtractFilePath(Application.ExeName) + 'VeriFactu_respuesta.xml';        // ultima respuesta de la AEAT
 
       ini:=Tinifile.create( curdir+'\verifactuform.ini' );
 
@@ -549,6 +669,9 @@ begin
 
       certificado           :=ini.readstring('certificado','ultimousado','');
 
+      editURL.Text          :=ini.readstring('verifactu','url','');
+      editQR.Text           :=ini.readstring('verifactu','qr','');
+
       ini.free;
 
       if not FileExists(xmlFacturas) then
@@ -559,7 +682,10 @@ begin
             FacturasEnviadas.FieldDefs.add('FechaExpedicioFactura',ftString,30);
             FacturasEnviadas.FieldDefs.add('Huella',ftString,70);
             FacturasEnviadas.FieldDefs.add('Estado',ftString,30);
+            FacturasEnviadas.FieldDefs.add('Situacion',ftString,30);
             FacturasEnviadas.FieldDefs.add('Csv',ftString,30);
+            FacturasEnviadas.FieldDefs.add('Cotejo',ftString,50);
+            FacturasEnviadas.FieldDefs.add('total',ftfloat,0);
             FacturasEnviadas.CreateDataSet;
             FacturasEnviadas.SaveToFile(xmlFacturas);
       end;
@@ -584,12 +710,25 @@ end;
 //
 // guardar el XML antes de enviarlo:
 //
+procedure TfVeriFactuForm.HTTPRIO1AfterExecute(const MethodName: string;
+  SOAPResponse: TStream);
+var
+      sTmp:TStringList;
+begin
+       sTmp:=TStringList.Create;
+       SOAPResponse.Position := 0;
+       sTmp.LoadFromStream(soapResponse);
+       sTmp.SaveToFile(xmlEnvio);
+       sTmp.Free;
+end;
+
 procedure TfVeriFactuForm.HTTPRIO1BeforeExecute(const MethodName: string; SOAPRequest: TStream);
 var
       ss:TFileStream;
       sTmp:TStringList;
 begin
       sTmp := TStringList.Create;
+      sTMP.SaveToStream(SOAPRequest);
       try
           SOAPRequest.Position := 0;
           sTmp.LoadFromStream(SOAPRequest);
@@ -603,7 +742,42 @@ begin
           FreeAndNil(sTmp);
       end;
 
-      if HTTPRIO1.Tag=1 then abort;   // si es simulacion: no enviarlo
+      if HTTPRIO1.Tag=1 then
+      begin
+              if saveXMLS.execute then  memoXML.Lines.SaveToFile(saveXMLS.FileName);
+              raise Exception.Create('XML Generado, Envio No Realizado');
+              abort;
+      end;
+end;
+
+procedure TfVeriFactuForm.HTTPRIO1HTTPWebNode1BeforePost(
+  const HTTPReqResp: THTTPReqResp; Data: Pointer);
+var
+     Store : IStore;
+     Certs : ICertificates;
+     Cert : ICertificate2;
+     CertContext : ICertContext;
+     PCertContext : PCCERT_CONTEXT;
+     V : OleVariant;
+ const
+     INTERNET_OPTION_CLIENT_CERT_CONTEXT = 84;
+ begin
+
+     V:=comboCertificados.Text;
+
+     Store := CoStore.Create;
+     Store.Open(CAPICOM_CURRENT_USER_STORE, 'MY',CAPICOM_STORE_OPEN_MAXIMUM_ALLOWED );
+     Certs:=Store.Certificates.Find(CAPICOM_CERTIFICATE_FIND_SUBJECT_NAME,V,False ); { Buscar certificado por nombre }
+     if Certs.Count > 0 then
+     begin
+         Cert:=IInterface(Certs.Item[1]) as ICertificate2;
+         CertContext:=Cert as ICertContext;
+         CertContext.Get_CertContext(Integer(PCertContext));
+         if InternetSetOption(Data,INTERNET_OPTION_CLIENT_CERT_CONTEXT,PCertContext,Sizeof(CERT_CONTEXT)) = False then
+         begin
+             ShowMessage( 'Internet SSL certificate. Something went wrong' );
+         end;
+     end;
 end;
 
 //
@@ -617,6 +791,7 @@ begin
             with factura do
             begin
                     nifEmisor             :=editNIFEmisor.Text;
+                    nombreEmisor          :=editEmisor.Text;
 
                     numSerieFactura       :=StringGridFacturas.Cells[ 1, fila ];
                     fechaFactura          :=StringGridFacturas.Cells[ 2, fila ];
@@ -683,16 +858,16 @@ begin
       FacturasEnviadas.fieldbyName('FechaExpedicioFactura').text  :=factura.fechaFactura;
       FacturasEnviadas.fieldbyName('Huella').text                 :=factura.huella;
       FacturasEnviadas.fieldbyName('Estado').text                 :=estado;
-
+      FacturasEnviadas.fieldbyName('total').ascurrency            :=factura.total;
       FacturasEnviadas.post;
 end;
 
 //
 // Se procesa el resultado devuelto por la AEAT ó el simulador
 //
-procedure TfVeriFactuForm.procesarEnvio( res:RespuestaBaseType );
+procedure TfVeriFactuForm.procesarEnvio( res:RespuestaRegFactuSistemaFacturacionType );
 var
-  estadoOK,estadoDUP,factura,errorDES:string;
+  estado,factura:string;
 
   j:integer;
 
@@ -701,24 +876,27 @@ var
 begin
       memoRes.lines.clear;
       memoRes.lines.Add('Se ha realizado el envío');
+      memoRes.Lines.Add('');
+      memoRes.Lines.Add('Estado Del Envio:'+ veriFactuEstadoEnvio(res.EstadoEnvio) );
       memoRes.lines.Add('CSV: ' + res.CSV);
-      memoRes.lines.Add('TimeStamp: ' + res.DatosPresentacion.TimestampPresentacion);
-      memoRes.lines.Add('');
+      try
+        memoRes.lines.Add('TimeStamp: ' ); // + res.DatosPresentacion.TimestampPresentacion);
+      except
+        memoRes.Lines.Add('Error En TimeStamp');
+      end;
+      memoRes.Lines.Add('');
 
       _ok   :=0;    // nº facturas OK
       _oke  :=0;    // nº facturas OK ( aceptada con errores )
       _err  :=0;    // nº facturas con errores
 
-      // ver el estado de cada factura
       for j := Low(res.RespuestaLinea) to High(res.RespuestaLinea) do
       begin
             factura  := res.RespuestaLinea[ j ].IDFactura.NumSerieFactura;
 
-            estadoOK := getEnumName( TypeInfo(EstadoRegistroType), ord(res.RespuestaLinea[ j ].EstadoRegistro) );
-            estadoDUP:= getEnumName( TypeInfo(EstadoRegistroSFType), ord(res.RespuestaLinea[ j ].EstadoRegistroDuplicado) );
-            errorDES := res.RespuestaLinea[ j ].DescripcionErrorRegistro;
+            estado := getEnumName( TypeInfo(EstadoRegistroType), ord(res.RespuestaLinea[ j ].EstadoRegistro) );
 
-            memoRes.Lines.Add( factura+' '+estadoOK+' '+estadoDUP+' '+errorDES );     // ver en pantalla
+            memoRes.Lines.Add( factura+' '+estado );     // ver en pantalla
 
             if res.RespuestaLinea[j].EstadoRegistro <> EstadoRegistroType(2) then     // si es correcto ó aceptado con errores
             begin
@@ -728,6 +906,7 @@ begin
                 begin
                     FacturasEnviadas.edit;
                     FacturasEnviadas.fieldbyName('csv').text:=res.CSV;
+                    FacturasEnviadas.fieldbyName('situacion').text:=estado;
                     FacturasEnviadas.post;
                 end;
 
@@ -736,7 +915,6 @@ begin
             end
             else
                 inc(_err);
-
       end;
 
       memoRes.Lines.Add('');
@@ -749,6 +927,14 @@ begin
 end;
 
 
+procedure TfVeriFactuForm.StringGridFacturasDblClick(Sender: TObject);
+begin
+      // LOCALIZAR FACTURA
+
+
+
+end;
+
 (*
       veriFactu
         + listafacturas
@@ -760,13 +946,13 @@ end;
 *)
 procedure TfVeriFactuForm.enviarClick(Sender: TObject);
 var
-  veriFactu         : RegFactuSistemaFacturacion;     // Objeto a enviar
-  listafacturas     : Array_Of_RegistroFacturaType;   // lista con las facturas verifactu
-  res               : RespuestaBaseType;              // Respuesta tras el envio
+  veriFactu         : RegFactuSistemaFacturacion;                  // Objeto a enviar
+  listafacturas     : Array_Of_RegistroFacturaType;               // lista con las facturas verifactu
+  res               : RespuestaRegFactuSistemaFacturacionType;    // Respuesta tras el envio
 
-  factura, anterior : TRegistroFactura;               // records con los datos de 1 factura   (utiles.pas)  diseño de formato propio
+  factura, anterior : TRegistroFactura;                           // records con los datos de 1 factura   (utiles.pas)  diseño de formato propio
 
-  estado  : string;
+  direccion_envio ,estado  : string;
   fila    : integer;
 begin
       screen.Cursor:=crHourglass;
@@ -781,10 +967,11 @@ begin
       //
       veriFactu:=RegFactuSistemaFacturacion.Create;
 
-      veriFactu.Cabecera                              :=cabecera.Create;
+      veriFactu.Cabecera                              :=CabeceraType.Create;
       veriFactu.Cabecera.ObligadoEmision              :=PersonaFisicaJuridicaESType.Create;
       veriFactu.Cabecera.ObligadoEmision.NombreRazon  :=editEmisor.Text;
       veriFactu.Cabecera.ObligadoEmision.NIF          :=editNIFEmisor.Text;
+
 
       //
       // recorrer las facturas de la rejilla
@@ -801,7 +988,7 @@ begin
 
                // crear la factura (en formato verifactu) desde el record de diseño propio que acabamos de llenar, (segun sea ALTA ó BAJA)
                if  estado='ALTA' then
-                   listaFacturas[ fila ]:= altafactura_F1_verifactu ( factura, anterior );     // colocar el objeto RegistroFacturacionAltaType devuelto por la funcion en el array
+                   listaFacturas[ fila ]:= altafactura_F1_F2_verifactu ( factura, anterior );     // colocar el objeto RegistroFacturacionAltaType devuelto por la funcion en el array
 
                if  estado='BAJA' then
                    listaFacturas[ fila ]:= anulacionfactura_verifactu ( factura, anterior );   // colocar el objeto RegistroFacturacionAnulacionType devuelto por la funcion en el array
@@ -815,30 +1002,19 @@ begin
 
       PageControlVerifactu.TabIndex:=1;                                        // nos preparamos para ver el resultado del envio en su tabulador
 
-      // envío:
+      // --> envío pre-produccion:  'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP';
       try
-            HTTPRIO1.HTTPWebNode.ClientCertificate.SerialNum := Buscar_Certificado_SERIAL( comboCertificados.text );  // coloca el certificado
+          HTTPRIO1.HTTPWebNode.ClientCertificate.SerialNum := Buscar_Certificado_SERIAL( comboCertificados.text );  // coloca el certificado
+          direccion_envio := editURL.text;
 
-            if sender=botonSimula then
-            begin
-                HTTPRIO1.Tag:=1;                                                                                      // abortara operacion en beforeExecute
-                try
-                    GetsfPortTypeVerifactu( False, '', HTTPRIO1 ).RegFactuSistemaFacturacion( veriFactu );            // hacemos un NO envio para obtener el XML (sera abortado)
-                except
-                end;
+          if sender=soloXML then HTTPRIO1.Tag:=1                                                                             // 0-envio  1-generar XML
+                            else HTTPRIO1.Tag:=0;                                                                            // 0-envio  1-generar XML
 
-                res:=simular_envio( veriFactu );                                                                      // simulamos el envio y recogemos la respuesta
-            end
-            else
-            begin
-                HTTPRIO1.Tag:=0;                                                                                      // envio real
-                res:=   RespuestaBaseType.Create;
-                res:=   GetsfPortTypeVerifactu( False, '', HTTPRIO1 ).RegFactuSistemaFacturacion( veriFactu );        // enviarlo !
-            end;
+          res:=   RespuestaRegFactuSistemaFacturacionType.Create;
+          res:=   GetsfPortTypeVerifactu( false, direccion_envio , HTTPRIO1 ).RegFactuSistemaFacturacion( veriFactu );        // enviarlo !
 
-            // resultado del envio:   (se colocara el csv si la factura ha sido aceptada, en la base de datos facturas.xml)
-            procesarEnvio(res);
-
+          // resultado del envio:   (se colocara el csv si la factura ha sido aceptada, en la base de datos: facturas.xml)
+          procesarEnvio(res);
       except
             on E:Exception do
                   memoRes.text  :=Format('Error al realizar el envío; (%s)-%s',[E.ClassName, E.Message]);
